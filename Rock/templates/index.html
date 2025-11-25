@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication</title>
+</head>
+<body>
+    <h2>Registration</h2>
+    <form action="/api/register/" method='POST'>
+        {% csrf_token %}
+        <label for="username">username</label>
+        <input type="text" id='reg_username' name='username'>
+        <br>
+        <label for='password'>password</label>
+        <input type="password" id='reg_password' name='password'>
+        <br>
+        <input type='submit'>
+    </form>
+    <h2>Login</h2>
+    <form action="">
+        <label for="username">username</label>
+        <input type="text" id='log_username'>
+        <br>
+        <label for='password'>password</label>
+        <input type="password" id='log_password'>
+        <br>
+        <input type='submit'>
+    </form>    
+</body>
+</html>
