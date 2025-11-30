@@ -88,6 +88,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'Rock.wsgi.application'
 
+AUTH_USER_MODEL = 'Room.User'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

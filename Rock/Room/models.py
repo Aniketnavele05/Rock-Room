@@ -1,12 +1,13 @@
 from django.db import models
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, AbstractUser
+from django.conf import settings
 import random, string
 # Create your models here.
 
 class Room(models.Model):
     room_code = models.CharField(unique=True,max_length=6)
-    host = models.ForeignKey(User, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=False)
+    host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
         if not self.room_code:
@@ -17,5 +18,8 @@ class Room(models.Model):
         char = string.ascii_uppercase + string.digits
         while True:
             code = ''.join(random.choices(char,k=6))
-            if not Room.objects.filter(code==self.room_code).exists:
-                return 
+            if not Room.objects.filter(room_code = code).exists():
+                return  code
+            
+class User(AbstractUser):
+    current_room = models.ForeignKey(Room, null=True, on_delete=models.SET_NULL)
