@@ -11,6 +11,9 @@ def index(request):
 def home(request):
     return render(request,'home.html')
 
+def room(request):
+    return render(request,'room.html')
+
 class Registration(APIView):
     def post(self, request):
         serializer = RegistrationSerializer(data=request.data)

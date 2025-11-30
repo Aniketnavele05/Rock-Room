@@ -27,7 +27,7 @@ class RoomSerializer(serializers.ModelSerializer):
 class RoomCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Room
-        field = ['id','room_code']
+        fields = ['id','room_code']
         read_only_fields = ['id','room_code']
 
     def create(self,validate_data):

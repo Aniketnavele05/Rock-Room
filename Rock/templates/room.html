@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rock N Roll - Room</title>
+</head>
+<body>
+    <h2>Welcome to Room: <span id="room_code_display"></span></h2>
+
+    <!-- Leave Room -->
+    <button onclick="leaveRoom()">Leave Room</button>
+
+    <hr>
+
+    <!-- Search Songs -->
+    <h3>Search Songs:</h3>
+    <form onsubmit="searchSongs(event)">
+        <input type="text" id="search_query" placeholder="Song name or artist">
+        <input type="submit" value="Search">
+    </form>
+
+    <!-- Song Results -->
+    <ul id="song_list"></ul>
+
+    <!-- Leaderboard -->
+    <button onclick="goToLeaderboard()">Leaderboard</button>
+
+<script>
+// ----- JWT & Fetch Helper Functions -----
+function getAccessToken() {
+    return localStorage.getItem("access");
+}
+function getRefreshToken() {
+    return localStorage.getItem("refresh");
+}
+
+async function fetchWithAuth(url, options) {
+    let token = getAccessToken();
+    if (!token) { alert("You must login first!"); return; }
+
+    options.headers = { ...options.headers, "Authorization": "Bearer " + token };
+
+    let response = await fetch(url, options);
+
+    if (response.status === 401) {
+        const refreshToken = getRefreshToken();
+        if (!refreshToken) { alert("Session expired."); window.location.href="/"; return; }
+
+        const refreshResponse = await fetch("/refresh/", {
+            method:"POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({refresh: refreshToken})
+        });
+
+        if (!refreshResponse.ok) { alert("Session expired."); window.location.href="/"; return; }
+
+        const refreshData = await refreshResponse.json();
+        localStorage.setItem("access", refreshData.access);
+        options.headers["Authorization"] = "Bearer " + refreshData.access;
+
+        response = await fetch(url, options);
+    }
+
+    return response.json();
+}
+
+// ----- Display Room Code -----
+async function loadRoomDetails() {
+    const data = await fetchWithAuth("/api/detail_room/", { method: "GET" });
+    if (data?.room_code) {
+        document.getElementById("room_code_display").innerText = data.room_code;
+    } else {
+        alert("You are not in a room!");
+        window.location.href = "/home/";
+    }
+}
+
+// ----- Leave Room -----
+async function leaveRoom() {
+    const data = await fetchWithAuth("/api/leave_room/", { method: "POST" });
+    alert(data?.message || "Left the room.");
+    window.location.href = "/home/";
+}
+
+// ----- Search Songs (YouTube API example) -----
+async function searchSongs(event) {
+    event.preventDefault();
+    const query = document.getElementById("search_query").value;
+    if (!query) return;
+
+    // Example: Using your own backend endpoint that fetches YT API results
+    const results = await fetchWithAuth(`/api/search_song/?q=${encodeURIComponent(query)}`, { method: "GET" });
+
+    const songList = document.getElementById("song_list");
+    songList.innerHTML = ""; // clear previous results
+
+    results.forEach(song => {
+        const li = document.createElement("li");
+        li.innerHTML = `${song.title} 
+            <button onclick="voteSong('${song.id}')">Vote</button>`;
+        songList.appendChild(li);
+    });
+}
+
+// ----- Vote for a song -----
+async function voteSong(songId) {
+    const data = await fetchWithAuth(`/api/vote_song/`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ song_id: songId })
+    });
+    alert(data?.message || "Voted!");
+}
+
+// ----- Go to Leaderboard -----
+function goToLeaderboard() {
+    window.location.href = "/leaderboard/"; // you can create this page later
+}
+
+// ----- Initialize room on page load -----
+window.onload = loadRoomDetails;
+</script>
+</body>
+</html>

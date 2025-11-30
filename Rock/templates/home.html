@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rock N Roll - Home</title>
+</head>
+<body>
+    <h2>Welcome to Rock N Roll</h2>
+    
+    <!-- Create Room -->
+    <button onclick="createRoom()">Create Room</button>
+
+    <!-- Join Room -->
+    <form onsubmit="joinRoom(event)">
+        <label>Join Room:</label>
+        <input type="text" id="room_code" placeholder="Enter room code">
+        <input type="submit" value="Join">
+    </form>
+
+<script>
+// ------------------ JWT Helpers ------------------
+function getAccessToken() { return localStorage.getItem("access"); }
+function getRefreshToken() { return localStorage.getItem("refresh"); }
+
+// Automatically refresh access token if expired
+async function fetchWithAuth(url, options) {
+    let token = getAccessToken();
+    if (!token) { alert("You must login first!"); return; }
+
+    options.headers = { ...options.headers, "Authorization": "Bearer " + token };
+
+    let response = await fetch(url, options);
+
+    // If token expired, refresh and retry
+    if (response.status === 401) {
+        const refreshToken = getRefreshToken();
+        if (!refreshToken) { alert("Session expired."); window.location.href="/"; return; }
+
+        const refreshResponse = await fetch("/refresh/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh: refreshToken })
+        });
+
+        if (!refreshResponse.ok) { alert("Session expired."); window.location.href="/"; return; }
+
+        const refreshData = await refreshResponse.json();
+        localStorage.setItem("access", refreshData.access);
+
+        // Retry original request with new access token
+        options.headers["Authorization"] = "Bearer " + refreshData.access;
+        response = await fetch(url, options);
+    }
+
+    return response.json();
+}
+
+// ------------------ Room Functions ------------------
+
+// Create Room
+async function createRoom() {
+    const data = await fetchWithAuth("/api/create_room/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+    });
+
+    if (data?.room_code) {
+        alert("Room created! Code: " + data.room_code);
+        // Redirect to room page
+        window.location.href = "/room/"; // <-- redirect to your Django room URL
+    } else {
+        alert("Error creating room");
+        console.error(data);
+    }
+}
+
+// Join Room
+async function joinRoom(event) {
+    event.preventDefault();
+    const room_code = document.getElementById("room_code").value;
+    if (!room_code) { alert("Enter room code"); return; }
+
+    const data = await fetchWithAuth("/api/join_room/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room_code })
+    });
+
+    if (!data.detail) {
+        alert("Joined Room: " + room_code);
+        window.location.href = "/room/"; // <-- redirect to room page
+    } else {
+        alert(data.detail || "Error joining room");
+    }
+}
+
+// ------------------ Initialization ------------------
+
+// Optional: check if user already has a room and redirect
+window.onload = async () => {
+    const roomData = await fetchWithAuth("/api/detail_room/", { method: "GET" });
+    if (roomData?.room_code) {
+        window.location.href = "/room/"; // user already in a room
+    }
+};
+</script>
+
+</body>
+</html>
