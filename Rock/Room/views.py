@@ -6,7 +6,10 @@ from .models import User, Room
 from .serializer import RegistrationSerializer, RoomCreateSerializer, RoomJoinSerializer, RoomLeaveSerializer, RoomSerializer
 # Create your views here.
 def index(request):
-    return render(request,'index.html')
+    return render(request,'Auth.html')
+
+def home(request):
+    return render(request,'home.html')
 
 class Registration(APIView):
     def post(self, request):
@@ -53,7 +56,7 @@ class LeaveRoom(APIView):
         serializer.save()
         return Response({'message':'left the room'})
 
-class getRoom(APIView):
+class DetailRoom(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self,request):
