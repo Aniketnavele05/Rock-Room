@@ -1,3 +1,5 @@
+import requests
+from django.conf import settings
 from django.shortcuts import render, redirect, HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -67,3 +69,30 @@ class DetailRoom(APIView):
         if not room:
             return Response({'detail':'no room'})
         return Response(RoomSerializer(room).data)
+    
+class SearchSong(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        query = request.GET.get('q')
+        if not query:
+            return Response({"error":"Query is required"},status=400)
+        
+        YOUTUBE_API_KEY = settings.YOUTUBE_API_KEY
+
+        url = (
+            "https://www.googleapis.com/youtube/v3/search?"
+            f"part=snippet&type=video&q={query}&key={YOUTUBE_API_KEY}"
+        )
+
+        r = requests.get(url)
+        data = r.json()
+
+        results = []
+        for item in data.get("items",[]):
+            results.append({
+                "title": item["snippet"]["title"],
+                "video_id": item["id"]["videoId"],
+                "thumbnail": item["snippet"]["thumbnails"]["default"]["url"]
+            })
+
+        return Response({"results":results})

@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views import Registration, CreateRoom, JoinRoom, LeaveRoom, DetailRoom
+from .views import Registration, CreateRoom, JoinRoom, LeaveRoom, DetailRoom, SearchSong
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 urlpatterns = [
@@ -14,4 +14,5 @@ urlpatterns = [
     path('api/leave_room/', LeaveRoom.as_view(), name='leave_room'),
     path('api/detail_room/', DetailRoom.as_view(), name='detail_room'),
     path('room/',views.room,name='room'),
+    path('api/search_song/',SearchSong.as_view(),name='search_song'),
 ]

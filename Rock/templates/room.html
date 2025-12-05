@@ -6,28 +6,23 @@
     <title>Rock N Roll - Room</title>
 </head>
 <body>
-    <h2>Welcome to Room: <span id="room_code_display"></span></h2>
 
-    <!-- Leave Room -->
-    <button onclick="leaveRoom()">Leave Room</button>
+<h2>Welcome to Room: <span id="room_code_display"></span></h2>
 
-    <hr>
+<button onclick="leaveRoom()">Leave Room</button>
 
-    <!-- Search Songs -->
-    <h3>Search Songs:</h3>
-    <form onsubmit="searchSongs(event)">
-        <input type="text" id="search_query" placeholder="Song name or artist">
-        <input type="submit" value="Search">
-    </form>
+<hr>
 
-    <!-- Song Results -->
-    <ul id="song_list"></ul>
+<h3>Search Songs:</h3>
+<input type="text" id="search_input" placeholder="Search song..." onkeyup="searchSong()">
 
-    <!-- Leaderboard -->
-    <button onclick="goToLeaderboard()">Leaderboard</button>
+<ul id="results"></ul>
+
+<button onclick="goToLeaderboard()">Leaderboard</button>
 
 <script>
-// ----- JWT & Fetch Helper Functions -----
+
+// ---------- JWT Helpers ----------
 function getAccessToken() {
     return localStorage.getItem("access");
 }
@@ -35,91 +30,100 @@ function getRefreshToken() {
     return localStorage.getItem("refresh");
 }
 
-async function fetchWithAuth(url, options) {
+async function fetchWithAuth(url, options = {}) {
     let token = getAccessToken();
-    if (!token) { alert("You must login first!"); return; }
 
-    options.headers = { ...options.headers, "Authorization": "Bearer " + token };
+    if (!options.headers) options.headers = {};
+
+    options.headers["Authorization"] = "Bearer " + token;
+
+    // Add JSON header only for POST / PUT
+    if (options.method !== "GET") {
+        options.headers["Content-Type"] = "application/json";
+    }
 
     let response = await fetch(url, options);
 
+    // If token expired -> refresh
     if (response.status === 401) {
-        const refreshToken = getRefreshToken();
-        if (!refreshToken) { alert("Session expired."); window.location.href="/"; return; }
-
-        const refreshResponse = await fetch("/refresh/", {
-            method:"POST",
-            headers: {"Content-Type":"application/json"},
-            body: JSON.stringify({refresh: refreshToken})
+        let refreshRes = await fetch("/refresh/", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ refresh: getRefreshToken() })
         });
 
-        if (!refreshResponse.ok) { alert("Session expired."); window.location.href="/"; return; }
+        let newTok = await refreshRes.json();
+        localStorage.setItem("access", newTok.access);
 
-        const refreshData = await refreshResponse.json();
-        localStorage.setItem("access", refreshData.access);
-        options.headers["Authorization"] = "Bearer " + refreshData.access;
-
+        options.headers["Authorization"] = "Bearer " + newTok.access;
         response = await fetch(url, options);
     }
 
     return response.json();
 }
 
-// ----- Display Room Code -----
+// ---------- Load Room ----------
 async function loadRoomDetails() {
     const data = await fetchWithAuth("/api/detail_room/", { method: "GET" });
-    if (data?.room_code) {
-        document.getElementById("room_code_display").innerText = data.room_code;
-    } else {
-        alert("You are not in a room!");
+
+    if (!data.room_code) {
+        alert("No room found");
         window.location.href = "/home/";
+        return;
     }
+
+    document.getElementById("room_code_display").innerText = data.room_code;
 }
 
-// ----- Leave Room -----
+// ---------- Leave Room ----------
 async function leaveRoom() {
     const data = await fetchWithAuth("/api/leave_room/", { method: "POST" });
-    alert(data?.message || "Left the room.");
+    alert(data.message);
     window.location.href = "/home/";
 }
 
-// ----- Search Songs (YouTube API example) -----
-async function searchSongs(event) {
-    event.preventDefault();
-    const query = document.getElementById("search_query").value;
+// ---------- Search Song ----------
+async function searchSong() {
+    const query = document.getElementById("search_input").value;
     if (!query) return;
 
-    // Example: Using your own backend endpoint that fetches YT API results
-    const results = await fetchWithAuth(`/api/search_song/?q=${encodeURIComponent(query)}`, { method: "GET" });
+    const data = await fetchWithAuth(`/api/search_song/?q=${encodeURIComponent(query)}`, {
+        method: "GET"
+    });
 
-    const songList = document.getElementById("song_list");
-    songList.innerHTML = ""; // clear previous results
+    const resultsBox = document.getElementById("results");
+    resultsBox.innerHTML = "";
 
-    results.forEach(song => {
+    data.results.forEach(song => {
         const li = document.createElement("li");
-        li.innerHTML = `${song.title} 
-            <button onclick="voteSong('${song.id}')">Vote</button>`;
-        songList.appendChild(li);
+        li.innerHTML = `
+            <img src="${song.thumbnail}" width="80">
+            <strong>${song.title}</strong>
+            <button onclick="voteSong('${song.video_id}')">Vote</button>
+        `;
+        resultsBox.appendChild(li);
     });
 }
 
-// ----- Vote for a song -----
-async function voteSong(songId) {
-    const data = await fetchWithAuth(`/api/vote_song/`, {
+// ---------- Vote ----------
+async function voteSong(videoId) {
+    const data = await fetchWithAuth("/api/vote_song/", {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ song_id: songId })
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ song_id: videoId })
     });
-    alert(data?.message || "Voted!");
+
+    alert(data.message);
 }
 
-// ----- Go to Leaderboard -----
+// ---------- Leaderboard ----------
 function goToLeaderboard() {
-    window.location.href = "/leaderboard/"; // you can create this page later
+    window.location.href = "/leaderboard/";
 }
 
-// ----- Initialize room on page load -----
 window.onload = loadRoomDetails;
+
 </script>
+
 </body>
 </html>

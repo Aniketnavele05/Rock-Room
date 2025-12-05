@@ -30,7 +30,7 @@ class RoomCreateSerializer(serializers.ModelSerializer):
         fields = ['id','room_code']
         read_only_fields = ['id','room_code']
 
-    def create(self,validate_data):
+    def create(self,validated_data):
         host = self.context['request'].user
         room = Room.objects.create(host=host)
         return room
@@ -58,3 +58,9 @@ class RoomLeaveSerializer(serializers.Serializer):
 
         user.current_room = None
         user.save()
+
+class SongSerializer(serializers.Serializer):
+    title = serializers.CharField()
+    video_id = serializers.CharField()
+    thumbnail = serializers.CharField()
+    channel = serializers.CharField()

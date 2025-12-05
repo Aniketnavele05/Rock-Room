@@ -90,6 +90,9 @@ WSGI_APPLICATION = 'Rock.wsgi.application'
 
 AUTH_USER_MODEL = 'Room.User'
 
+# settings.py
+YOUTUBE_API_KEY = "AIzaSyCb55GxfxjDjEPJgQUH3A5C-I6P3PkVrEY"
+
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 

@@ -23,3 +23,14 @@ class Room(models.Model):
             
 class User(AbstractUser):
     current_room = models.ForeignKey(Room, null=True, on_delete=models.SET_NULL)
+
+class Song(models.Model):
+    room = models.ForeignKey(Room, on_delete=models.CASCADE)
+    title = models.CharField( max_length=250)
+    video_id = models.CharField(max_length=50)
+    thumbnail = models.URLField()
+    added_by = models.ForeignKey(User, on_delete=models.CASCADE)
+
+class Vote(models.Model):
+    song = models.ForeignKey(Song,  on_delete=models.CASCADE)
+    user = models.ForeignKey(User,  on_delete=models.CASCADE)
