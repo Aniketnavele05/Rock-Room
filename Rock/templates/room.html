@@ -13,12 +13,15 @@
 
 <hr>
 
-<h3>Search Songs:</h3>
-<input type="text" id="search_input" placeholder="Search song..." onkeyup="searchSong()">
+<h3>Song URL Enter Here:</h3>
+<input type="text" id="search_input" placeholder="Paste YouTube URL">
+<button onclick="AddToQueue()">Add</button>
 
-<ul id="results"></ul>
+<hr>
 
-<button onclick="goToLeaderboard()">Leaderboard</button>
+<div id="queue_list">
+    <!-- Songs will appear here -->
+</div>
 
 <script>
 
@@ -37,14 +40,12 @@ async function fetchWithAuth(url, options = {}) {
 
     options.headers["Authorization"] = "Bearer " + token;
 
-    // Add JSON header only for POST / PUT
     if (options.method !== "GET") {
         options.headers["Content-Type"] = "application/json";
     }
 
     let response = await fetch(url, options);
 
-    // If token expired -> refresh
     if (response.status === 401) {
         let refreshRes = await fetch("/refresh/", {
             method: "POST",
@@ -82,43 +83,51 @@ async function leaveRoom() {
     window.location.href = "/home/";
 }
 
-// ---------- Search Song ----------
-async function searchSong() {
-    const query = document.getElementById("search_input").value;
-    if (!query) return;
+// ---------- Add To Queue ----------
+async function AddToQueue() {
+    const url = document.getElementById("search_input").value;
 
-    const data = await fetchWithAuth(`/api/search_song/?q=${encodeURIComponent(query)}`, {
-        method: "GET"
+    if (!url) {
+        alert("Please enter a YouTube URL");
+        return;
+    }
+
+    const data = await fetchWithAuth("/api/add_song/", {
+        method: "POST",
+        body: JSON.stringify({ url: url })    // sending URL to backend
     });
 
-    const resultsBox = document.getElementById("results");
-    resultsBox.innerHTML = "";
+    if (data.detail) {
+        alert(data.detail);
+        return;
+    }
 
-    data.results.forEach(song => {
-        const li = document.createElement("li");
-        li.innerHTML = `
-            <img src="${song.thumbnail}" width="80">
-            <strong>${song.title}</strong>
-            <button onclick="voteSong('${song.video_id}')">Vote</button>
-        `;
-        resultsBox.appendChild(li);
-    });
+    addSongToDOM(data);
+}
+
+// ---------- Display Song in Queue ----------
+function addSongToDOM(song) {
+    const div = document.createElement("div");
+    div.style.margin = "10px 0";
+
+    div.innerHTML = `
+        <img src="${song.thumbnail}" width="120"><br>
+        <b>${song.title}</b><br>
+        <button onclick="voteSong(${song.id})">Vote</button>
+        <hr>
+    `;
+
+    document.getElementById("queue_list").appendChild(div);
 }
 
 // ---------- Vote ----------
-async function voteSong(videoId) {
+async function voteSong(songId) {
     const data = await fetchWithAuth("/api/vote_song/", {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ song_id: videoId })
+        body: JSON.stringify({ song_id: songId })
     });
 
     alert(data.message);
-}
-
-// ---------- Leaderboard ----------
-function goToLeaderboard() {
-    window.location.href = "/leaderboard/";
 }
 
 window.onload = loadRoomDetails;

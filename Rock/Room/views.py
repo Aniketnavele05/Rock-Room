@@ -4,8 +4,8 @@ from django.shortcuts import render, redirect, HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import User, Room
-from .serializer import RegistrationSerializer, RoomCreateSerializer, RoomJoinSerializer, RoomLeaveSerializer, RoomSerializer
+from .models import User, Room, Song
+from .serializer import RegistrationSerializer, RoomCreateSerializer, RoomJoinSerializer, RoomLeaveSerializer, RoomSerializer, UrlExtractserializer
 # Create your views here.
 def index(request):
     return render(request,'Auth.html')
@@ -70,29 +70,40 @@ class DetailRoom(APIView):
             return Response({'detail':'no room'})
         return Response(RoomSerializer(room).data)
     
-class SearchSong(APIView):
+class SongAddToQueue(APIView):
     permission_classes = [IsAuthenticated]
-    def get(self, request):
-        query = request.GET.get('q')
-        if not query:
-            return Response({"error":"Query is required"},status=400)
-        
-        YOUTUBE_API_KEY = settings.YOUTUBE_API_KEY
 
-        url = (
-            "https://www.googleapis.com/youtube/v3/search?"
-            f"part=snippet&type=video&q={query}&key={YOUTUBE_API_KEY}"
+    def post(self, request):
+
+        serializer = UrlExtractserializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        video_id = serializer.video_id 
+
+        oembed_url = (
+            f"https://www.youtube.com/oembed"
+            f"?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        )
+        meta = requests.get(oembed_url).json()
+
+        title = meta["title"]
+        thumbnail = meta["thumbnail_url"]
+
+        room = request.user.current_room
+        if not room:
+            return Response({"error": "You are not in a room"}, status=400)
+
+        song = Song.objects.create(
+            room=room,
+            title=title,
+            video_id=video_id,
+            thumbnail=thumbnail,
+            added_by=request.user
         )
 
-        r = requests.get(url)
-        data = r.json()
-
-        results = []
-        for item in data.get("items",[]):
-            results.append({
-                "title": item["snippet"]["title"],
-                "video_id": item["id"]["videoId"],
-                "thumbnail": item["snippet"]["thumbnails"]["default"]["url"]
-            })
-
-        return Response({"results":results})
+        return Response({
+            "id": song.id,
+            "title": title,
+            "video_id": video_id,
+            "thumbnail": thumbnail
+        })

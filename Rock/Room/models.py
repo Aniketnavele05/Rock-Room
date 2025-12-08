@@ -26,10 +26,14 @@ class User(AbstractUser):
 
 class Song(models.Model):
     room = models.ForeignKey(Room, on_delete=models.CASCADE)
-    title = models.CharField( max_length=250)
+    title = models.CharField(max_length=250)
     video_id = models.CharField(max_length=50)
     thumbnail = models.URLField()
     added_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
 
 class Vote(models.Model):
     song = models.ForeignKey(Song,  on_delete=models.CASCADE)

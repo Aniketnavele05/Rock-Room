@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import User,Room
+import re
 
 class RegistrationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -64,3 +65,20 @@ class SongSerializer(serializers.Serializer):
     video_id = serializers.CharField()
     thumbnail = serializers.CharField()
     channel = serializers.CharField()
+
+class UrlExtractserializer(serializers.Serializer):
+    url = serializers.CharField()
+
+    yt_regex = re.compile(
+        r'(?:https?:\/\/)?(?:www\.)?'
+        r'(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)'
+        r'([A-Za-z0-9_-]{11})'
+    )
+
+    def validate_url(self,value):
+        match = self.yt_regex.search(value)
+        if not match:
+            raise serializers.ValidationError("Invalid YT Url")
+       
+        self.video_id = match.group(1)
+        return value
