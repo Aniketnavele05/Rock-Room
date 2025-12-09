@@ -13,102 +13,144 @@
 
 <hr>
 
-<h3>Song URL Enter Here:</h3>
+<h3>Add Song to Queue</h3>
 <input type="text" id="search_input" placeholder="Paste YouTube URL">
 <button onclick="AddToQueue()">Add</button>
 
 <hr>
 
-<div id="queue_list">
-    <!-- Songs will appear here -->
-</div>
+<h3>Queue:</h3>
+<div id="queue_list"></div>
 
 <script>
 
-// ---------- JWT Helpers ----------
-function getAccessToken() {
-    return localStorage.getItem("access");
-}
-function getRefreshToken() {
-    return localStorage.getItem("refresh");
-}
+// ======================== TOKEN HELPERS ========================
+function getAccessToken() { return localStorage.getItem("access"); }
+function getRefreshToken() { return localStorage.getItem("refresh"); }
 
+// ======================== SAFE FETCH FUNCTION ========================
 async function fetchWithAuth(url, options = {}) {
     let token = getAccessToken();
 
     if (!options.headers) options.headers = {};
-
     options.headers["Authorization"] = "Bearer " + token;
 
-    if (options.method !== "GET") {
+    if (options.method && options.method !== "GET") {
         options.headers["Content-Type"] = "application/json";
     }
 
-    let response = await fetch(url, options);
+    let response;
 
+    // 🔥 Catch network-level errors (server down etc.)  
+    try {
+        response = await fetch(url, options);
+    } catch (e) {
+        return {
+            ok: false,
+            status: 0,
+            data: { error: "Network error — server unreachable" }
+        };
+    }
+
+    // 🔁 Auto refresh token if expired  
     if (response.status === 401) {
-        let refreshRes = await fetch("/refresh/", {
+        const refreshRes = await fetch("/refresh/", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ refresh: getRefreshToken() })
         });
 
-        let newTok = await refreshRes.json();
-        localStorage.setItem("access", newTok.access);
+        let newTok;
+        try { newTok = await refreshRes.json(); } catch { newTok = {}; }
 
-        options.headers["Authorization"] = "Bearer " + newTok.access;
-        response = await fetch(url, options);
+        if (newTok.access) {
+            localStorage.setItem("access", newTok.access);
+            options.headers["Authorization"] = "Bearer " + newTok.access;
+            response = await fetch(url, options);
+        }
     }
 
-    return response.json();
+    // 🔥 Safely parse JSON WITHOUT causing console error  
+    let data;
+    try {
+        data = await response.json();
+    } catch (err) {
+        data = { error: "Invalid server response" };
+    }
+
+    return { ok: response.ok, status: response.status, data };
 }
 
-// ---------- Load Room ----------
+// ======================== LOAD ROOM ========================
 async function loadRoomDetails() {
-    const data = await fetchWithAuth("/api/detail_room/", { method: "GET" });
+    const res = await fetchWithAuth("/api/detail_room/", { method: "GET" });
 
-    if (!data.room_code) {
-        alert("No room found");
-        window.location.href = "/home/";
+    if (!res.ok) {
+        alert("Failed to load room");
         return;
     }
 
-    document.getElementById("room_code_display").innerText = data.room_code;
+    document.getElementById("room_code_display").innerText = res.data.room_code;
 }
 
-// ---------- Leave Room ----------
+// ======================== LEAVE ROOM ========================
 async function leaveRoom() {
-    const data = await fetchWithAuth("/api/leave_room/", { method: "POST" });
-    alert(data.message);
+    const res = await fetchWithAuth("/api/leave_room/", { method: "POST" });
+
+    alert(res.data.message);
     window.location.href = "/home/";
 }
 
-// ---------- Add To Queue ----------
+// ======================== LOAD QUEUE ========================
+async function loadQueue() {
+    const res = await fetchWithAuth("/api/room_songs/", { method: "GET" });
+
+    const list = document.getElementById("queue_list");
+    list.innerHTML = "";
+
+    if (!res.ok) {
+        list.innerHTML = "<p>Error loading queue</p>";
+        return;
+    }
+
+    if (!Array.isArray(res.data)) return;
+
+    res.data.forEach(song => addSongToDOM(song));
+}
+
+// ======================== ADD TO QUEUE ========================
 async function AddToQueue() {
-    const url = document.getElementById("search_input").value;
+    const url = document.getElementById("search_input").value.trim();
 
     if (!url) {
         alert("Please enter a YouTube URL");
         return;
     }
 
-    const data = await fetchWithAuth("/api/add_song/", {
+    const res = await fetchWithAuth("/api/add_song/", {
         method: "POST",
-        body: JSON.stringify({ url: url })    // sending URL to backend
+        body: JSON.stringify({ url })
     });
 
-    if (data.detail) {
-        alert(data.detail);
+    // ⚠️ SAFE ERROR HANDLING  
+    if (!res.ok) {
+        if (res.data.url) {
+            alert(res.data.url[0]);   // serializer error  
+        } else if (res.data.error) {
+            alert(res.data.error);    // server message  
+        } else {
+            alert("Invalid YouTube URL or server error");
+        }
         return;
     }
 
-    addSongToDOM(data);
+    loadQueue();  // reload queue
 }
 
-// ---------- Display Song in Queue ----------
+// ======================== DISPLAY SONG ========================
 function addSongToDOM(song) {
     const div = document.createElement("div");
-    div.style.margin = "10px 0";
+    div.style.margin = "12px 0";
 
     div.innerHTML = `
         <img src="${song.thumbnail}" width="120"><br>
@@ -120,17 +162,22 @@ function addSongToDOM(song) {
     document.getElementById("queue_list").appendChild(div);
 }
 
-// ---------- Vote ----------
+// ======================== VOTE ========================
 async function voteSong(songId) {
-    const data = await fetchWithAuth("/api/vote_song/", {
+    const res = await fetchWithAuth("/api/vote_song/", {
         method: "POST",
         body: JSON.stringify({ song_id: songId })
     });
 
-    alert(data.message);
+    alert(res.data.message);
+    loadQueue();
 }
 
-window.onload = loadRoomDetails;
+// ======================== PAGE LOAD ========================
+window.onload = function() {
+    loadRoomDetails();
+    loadQueue();
+};
 
 </script>
 

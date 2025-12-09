@@ -2,7 +2,7 @@ from django.urls import path
 from . import views
 from .views import (
     Registration, CreateRoom, JoinRoom, LeaveRoom,
-    DetailRoom, SongAddToQueue
+    DetailRoom, SongAddToQueue, RoomSongs
 )
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -26,4 +26,6 @@ urlpatterns = [
 
     # Song actions
     path('api/add_song/', SongAddToQueue.as_view(), name='add_song'),
+    path('api/room_songs/', RoomSongs.as_view(), name='room_songs'),
+
 ]
