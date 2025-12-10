@@ -36,6 +36,7 @@ class Song(models.Model):
     played_at = models.DateTimeField(null=True,blank=True)
 
     class Meta:
+        unique_together = ('room', 'video_id')
         indexes = [
             models.Index(fields=['video_id']),
             models.Index(fields=['room', 'played_at']),

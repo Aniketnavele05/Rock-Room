@@ -81,7 +81,6 @@ class DetailRoom(APIView):
             return Response({"detail": "no room"})
         return Response(RoomSerializer(room).data)
 
-
 class SongAddToQueue(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -90,7 +89,12 @@ class SongAddToQueue(APIView):
         serializer.is_valid(raise_exception=True)
 
         video_id = serializer.video_id
+        room = request.user.current_room
 
+        if not room:
+            return Response({"error": "You are not in a room"}, status=400)
+
+        # Call YouTube oEmbed API
         oembed_url = (
             f"https://www.youtube.com/oembed"
             f"?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -107,12 +111,22 @@ class SongAddToQueue(APIView):
         title = meta.get("title")
         thumbnail = meta.get("thumbnail_url")
 
-        room = request.user.current_room
-        if not room:
-            return Response({"error": "You are not in a room"}, status=400)
+        # 1. Song already in queue
+        if Song.objects.filter(room=room, video_id=video_id, played_at__isnull=True).exists():
+            return Response({"error": "Song already in queue"}, status=400)
 
+        # 2. Check recently played
+        recent = Song.objects.filter(room=room, video_id=video_id, played_at__isnull=False)
+        for s in recent:
+            if not s.can_played_again():  # uses your 10-min window
+                return Response({
+                    "error": "This song was played recently. Try again later."
+                }, status=400)
+
+        # 3. Add song to queue
         song = Song.objects.create(
-            room=room, title=title,
+            room=room,
+            title=title,
             video_id=video_id,
             thumbnail=thumbnail,
             added_by=request.user
@@ -124,7 +138,6 @@ class SongAddToQueue(APIView):
             "video_id": song.video_id,
             "thumbnail": song.thumbnail
         }, status=201)
-
 
 class RoomSongs(APIView):
     permission_classes = [IsAuthenticated]
