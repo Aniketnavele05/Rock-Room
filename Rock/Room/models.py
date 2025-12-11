@@ -58,10 +58,11 @@ class Vote(models.Model):
     song = models.ForeignKey(Song, on_delete=models.CASCADE, related_name='votes')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    room = models.ForeignKey(Room, on_delete=models.CASCADE)
     class Meta:
-        unique_together = ('song', 'user')  # one vote per user per song
+        unique_together = ('song', 'user','room')  # one vote per user per song
         indexes = [
             models.Index(fields=['song']),
             models.Index(fields=['user']),
+            models.Index(fields=['room']),
         ]

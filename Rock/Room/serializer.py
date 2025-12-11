@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Room
+from .models import User, Room, Vote
 import re
 
 class RegistrationSerializer(serializers.ModelSerializer):
@@ -89,3 +89,11 @@ class UrlExtractserializer(serializers.Serializer):
         # Store in serializer instance for view
         self.video_id = match.group(1)
         return value
+
+class VoteSerializer(serializers.ModelSerializer):
+    song_id = serializers.IntegerField(read_only=True)
+    user_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Vote
+        fields = ['id','song','user','created_at']

@@ -1,22 +1,28 @@
 import requests
+from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.conf import settings
 from django.shortcuts import render, redirect
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import Room, Song, User   # ✅ FIXED HERE
+from .models import Room, Song, User, Vote
 from rest_framework import status
 from .serializer import (
     RegistrationSerializer, RoomCreateSerializer,
     RoomJoinSerializer, RoomLeaveSerializer,
-    RoomSerializer, UrlExtractserializer
+    RoomSerializer, UrlExtractserializer,
+    VoteSerializer,
 )
+
 
 def index(request):
     return render(request, 'Auth.html')
 
+
 def home(request):
     return render(request, 'home.html')
+
 
 def room(request):
     return render(request, 'room.html')
@@ -78,8 +84,9 @@ class DetailRoom(APIView):
     def get(self, request):
         room = request.user.current_room
         if not room:
-            return Response({"detail": "no room"})
+            return Response({"detail": "no room"}, status=400)
         return Response(RoomSerializer(room).data)
+
 
 class SongAddToQueue(APIView):
     permission_classes = [IsAuthenticated]
@@ -111,11 +118,11 @@ class SongAddToQueue(APIView):
         title = meta.get("title")
         thumbnail = meta.get("thumbnail_url")
 
-        # 1. Song already in queue
+        # 1. Song already in queue (room-scoped)
         if Song.objects.filter(room=room, video_id=video_id, played_at__isnull=True).exists():
             return Response({"error": "Song already in queue"}, status=400)
 
-        # 2. Check recently played
+        # 2. Check recently played (room-scoped)
         recent = Song.objects.filter(room=room, video_id=video_id, played_at__isnull=False)
         for s in recent:
             if not s.can_played_again():  # uses your 10-min window
@@ -139,27 +146,103 @@ class SongAddToQueue(APIView):
             "thumbnail": song.thumbnail
         }, status=201)
 
+
 class RoomSongs(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        room = request.user.current_room
+        if not room:
+            return Response({"error": "You are not in a room"}, status=400)
+
+        # Room-scoped vote_count using a filtered Count
+        songs = (
+            Song.objects.filter(room=room, played_at__isnull=True)
+                        .annotate(vote_count=Count('votes', filter=Q(votes__room=room)))
+                        .order_by("-vote_count", "created_at")
+        )
+
+        data = [{
+            "id": s.id,
+            "title": s.title,
+            "video_id": s.video_id,
+            "thumbnail": s.thumbnail,
+            "added_by": s.added_by.username,
+            "vote_count": getattr(s, "vote_count", 0)
+        } for s in songs]
+
+        return Response(data)
+
+
+class VoteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, song_id):
+        user = request.user
+        room = user.current_room
+        if not room:
+            return Response({'error': 'You are not in a room'}, status=400)
+
         try:
-            room = request.user.current_room
-            if not room:
-                return Response({"error": "You are not in a room"}, status=400)
+            song = Song.objects.get(id=song_id, room=room)
+        except Song.DoesNotExist:
+            return Response({'error': 'Song not found in this room'}, status=404)
 
-            songs = Song.objects.filter(room=room).order_by('id')
+        try:
+            with transaction.atomic():
+                vote = Vote.objects.create(song=song, user=user, room=room)
+        except IntegrityError:
+            return Response({'error': 'You already voted for this song'}, status=status.HTTP_400_BAD_REQUEST)
 
-            data = [{
-                "id": s.id,
-                "title": s.title,
-                "video_id": s.video_id,
-                "thumbnail": s.thumbnail,
-                "added_by": s.added_by.username
-            } for s in songs]
+        serializer = VoteSerializer(vote)
+        vote_count = Vote.objects.filter(song=song, room=room).count()
+        return Response({"vote": serializer.data, "vote_count": vote_count}, status=status.HTTP_201_CREATED)
 
-            return Response(data)
+    def delete(self, request, song_id):
+        user = request.user
+        room = user.current_room
+        if not room:
+            return Response({'error': 'You are not in a room'}, status=400)
 
-        except Exception as e:
-            print("ROOM SONG ERROR:", e)
-            return Response({"error": str(e)}, status=500)
+        try:
+            song = Song.objects.get(id=song_id, room=room)
+        except Song.DoesNotExist:
+            return Response({'error': 'Song not found in this room'}, status=404)
+
+        vote = Vote.objects.filter(song=song, user=user, room=room).first()
+        if not vote:
+            return Response({'error': 'You have not voted for this song'}, status=status.HTTP_400_BAD_REQUEST)
+
+        vote.delete()
+        vote_count = Vote.objects.filter(song=song, room=room).count()
+        return Response({'message': 'Vote removed', 'vote_count': vote_count}, status=status.HTTP_200_OK)
+
+
+class VoteToggleView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, song_id):
+        user = request.user
+        room = user.current_room
+        if not room:
+            return Response({'error': 'You are not in a room'}, status=400)
+
+        try:
+            song = Song.objects.get(id=song_id, room=room)
+        except Song.DoesNotExist:
+            return Response({'error': 'Song not found in this room'}, status=404)
+
+        existing = Vote.objects.filter(song=song, user=user, room=room).first()
+        if existing:
+            existing.delete()
+            action = "removed"
+        else:
+            try:
+                with transaction.atomic():
+                    Vote.objects.create(song=song, user=user, room=room)
+                action = "added"
+            except IntegrityError:
+                return Response({"error": "You already voted"}, status=status.HTTP_400_BAD_REQUEST)
+
+        vote_count = Vote.objects.filter(song=song, room=room).count()
+        return Response({"action": action, "vote_count": vote_count}, status=status.HTTP_200_OK)
