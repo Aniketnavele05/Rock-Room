@@ -87,7 +87,6 @@ class DetailRoom(APIView):
             return Response({"detail": "no room"}, status=400)
         return Response(RoomSerializer(room).data)
 
-
 class SongAddToQueue(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -101,7 +100,6 @@ class SongAddToQueue(APIView):
         if not room:
             return Response({"error": "You are not in a room"}, status=400)
 
-        # Call YouTube oEmbed API
         oembed_url = (
             f"https://www.youtube.com/oembed"
             f"?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -109,43 +107,30 @@ class SongAddToQueue(APIView):
 
         try:
             resp = requests.get(oembed_url, timeout=5)
-            if resp.status_code != 200:
-                return Response({"error": "Could not fetch YouTube metadata"}, status=400)
+            resp.raise_for_status()
             meta = resp.json()
         except Exception:
-            return Response({"error": "Invalid YouTube video or YouTube API error"}, status=400)
+            return Response({"error": "Invalid YouTube video"}, status=400)
 
-        title = meta.get("title")
-        thumbnail = meta.get("thumbnail_url")
+        if Song.objects.filter(
+            room=room,
+            video_id=video_id,
+            played_at__isnull=True
+        ).exists():
+            return Response(
+                {"error": "Song already in queue"},
+                status=400
+            )
 
-        # 1. Song already in queue (room-scoped)
-        if Song.objects.filter(room=room, video_id=video_id, played_at__isnull=True).exists():
-            return Response({"error": "Song already in queue"}, status=400)
-
-        # 2. Check recently played (room-scoped)
-        recent = Song.objects.filter(room=room, video_id=video_id, played_at__isnull=False)
-        for s in recent:
-            if not s.can_played_again():  # uses your 10-min window
-                return Response({
-                    "error": "This song was played recently. Try again later."
-                }, status=400)
-
-        # 3. Add song to queue
         song = Song.objects.create(
             room=room,
-            title=title,
+            title=meta.get("title"),
             video_id=video_id,
-            thumbnail=thumbnail,
+            thumbnail=meta.get("thumbnail_url"),
             added_by=request.user
         )
 
-        return Response({
-            "id": song.id,
-            "title": song.title,
-            "video_id": song.video_id,
-            "thumbnail": song.thumbnail
-        }, status=201)
-
+        return Response({"id": song.id}, status=201)
 
 class RoomSongs(APIView):
     permission_classes = [IsAuthenticated]
@@ -155,23 +140,24 @@ class RoomSongs(APIView):
         if not room:
             return Response({"error": "You are not in a room"}, status=400)
 
-        # Room-scoped vote_count using a filtered Count
         songs = (
-            Song.objects.filter(room=room, played_at__isnull=True)
-                        .annotate(vote_count=Count('votes', filter=Q(votes__room=room)))
-                        .order_by("-vote_count", "created_at")
+            Song.objects
+            .filter(room=room)
+            .annotate(vote_count=Count('votes', filter=Q(votes__room=room)))
+            .order_by("-vote_count", "created_at")
         )
 
-        data = [{
-            "id": s.id,
-            "title": s.title,
-            "video_id": s.video_id,
-            "thumbnail": s.thumbnail,
-            "added_by": s.added_by.username,
-            "vote_count": getattr(s, "vote_count", 0)
-        } for s in songs]
-
-        return Response(data)
+        return Response([
+            {
+                "id": s.id,
+                "title": s.title,
+                "video_id": s.video_id,
+                "thumbnail": s.thumbnail,
+                "vote_count": s.vote_count,
+                "played_at": s.played_at,
+            }
+            for s in songs
+        ])
 
 
 class VoteView(APIView):
@@ -217,7 +203,6 @@ class VoteView(APIView):
         vote_count = Vote.objects.filter(song=song, room=room).count()
         return Response({'message': 'Vote removed', 'vote_count': vote_count}, status=status.HTTP_200_OK)
 
-
 class VoteToggleView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -246,3 +231,39 @@ class VoteToggleView(APIView):
 
         vote_count = Vote.objects.filter(song=song, room=room).count()
         return Response({"action": action, "vote_count": vote_count}, status=status.HTTP_200_OK)
+
+
+class PlayedSongView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        room = request.user.current_room
+        if not room:
+            return Response({"error": "You are not in a room"}, status=400)
+
+        songs = (
+            Song.objects
+            .filter(room=room)
+            .annotate(vote_count=Count('votes', filter=Q(votes__room=room)))
+            .order_by("-vote_count", "created_at")
+        )
+
+        for song in songs:
+            if song.was_played_within(10):
+                continue
+
+            song.mark_played()
+
+            return Response({
+                "id": song.id,
+                "title": song.title,
+                "video_id": song.video_id,
+                "thumbnail": song.thumbnail,
+                "vote_count": song.vote_count,
+                "added_by": song.added_by.username,
+            })
+
+        return Response(
+            {"message": "No playable song (cooldown active)"},
+            status=200
+        )
