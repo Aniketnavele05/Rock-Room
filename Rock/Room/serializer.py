@@ -33,41 +33,19 @@ class RoomSerializer(serializers.ModelSerializer):
         return request.user == obj.host
 
 
-class RoomCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Room
-        fields = ['id', 'room_code']
-        read_only_fields = ['id', 'room_code']
-
-    def create(self, validated_data):
-        host = self.context['request'].user
-        return Room.objects.create(host=host)
-
-
 class RoomJoinSerializer(serializers.Serializer):
     room_code = serializers.CharField()
 
     def validate(self, data):
         code = data['room_code']
-        if not Room.objects.filter(room_code=code).exists():
-            raise serializers.ValidationError('room is not active')
+        
+        try:
+            room = Room.objects.get(room_code = code)
+        except Room.DoesNotExist:
+            raise serializers.ValidationError('room does not exist')
+        
+        data['room'] = room
         return data
-
-
-class RoomLeaveSerializer(serializers.Serializer):
-    def save(self):
-        user = self.context['request'].user
-
-        if not user.current_room:
-            raise serializers.ValidationError('You are not in a room')
-
-        room = user.current_room
-
-        if user == room.host:
-            room.delete()
-
-        user.current_room = None
-        user.save()
 
 
 class SongSerializer(serializers.Serializer):

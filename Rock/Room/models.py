@@ -7,18 +7,16 @@ import random
 import string
 
 
-
 class User(AbstractUser):
-
     pass
 
 
 class Room(models.Model):
     room_code = models.CharField(max_length=6, unique=True)
-    host = models.ForeignKey(
+    host = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="hosted_rooms"
+        related_name="hosted_room"
     )
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
@@ -39,11 +37,30 @@ class Room(models.Model):
             if not Room.objects.filter(room_code=code).exists():
                 return code
 
+    def __str__(self):
+        return f"Room {self.room_code}"
+
+
 class Song(models.Model):
-    room = models.ForeignKey(Room, on_delete=models.CASCADE)
     title = models.CharField(max_length=250)
-    video_id = models.CharField(max_length=50)
+    video_id = models.CharField(max_length=50, unique=True)
     thumbnail = models.URLField()
+
+    def __str__(self):
+        return f"{self.title} ({self.video_id})"
+
+
+class RoomSong(models.Model):
+    room = models.ForeignKey(
+        Room,
+        on_delete=models.CASCADE,
+        related_name="room_songs"
+    )
+    song = models.ForeignKey(
+        Song,
+        on_delete=models.CASCADE,
+        related_name="room_songs"
+    )
     added_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE
@@ -52,15 +69,14 @@ class Song(models.Model):
     played_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        unique_together = ('room', 'video_id')
+        unique_together = ("room", "song")
         indexes = [
-            models.Index(fields=['video_id']),
-            models.Index(fields=['room', 'played_at']),
+            models.Index(fields=["room", "created_at"]),
         ]
 
     def mark_played(self):
         self.played_at = timezone.now()
-        self.save(update_fields=['played_at'])
+        self.save(update_fields=["played_at"])
 
     def was_played_within(self, minutes: int) -> bool:
         if not self.played_at:
@@ -71,32 +87,27 @@ class Song(models.Model):
         return not self.was_played_within(minutes)
 
     def __str__(self):
-        return f"{self.title} ({self.video_id})"
+        return f"{self.song.title} in {self.room.room_code}"
 
 
 class Vote(models.Model):
-    song = models.ForeignKey(
-        Song,
+    room_song = models.ForeignKey(
+        RoomSong,
         on_delete=models.CASCADE,
-        related_name='votes'
+        related_name="votes"
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE
     )
-    room = models.ForeignKey(
-        Room,
-        on_delete=models.CASCADE
-    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('song', 'user', 'room')
+        unique_together = ("room_song", "user")
         indexes = [
-            models.Index(fields=['song']),
-            models.Index(fields=['user']),
-            models.Index(fields=['room']),
+            models.Index(fields=["room_song"]),
+            models.Index(fields=["user"]),
         ]
 
     def __str__(self):
-        return f"Vote: {self.user_id} → {self.song_id}"
+        return f"Vote: {self.user_id} → {self.room_song_id}"

@@ -41,14 +41,25 @@ class CreateRoom(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = RoomCreateSerializer(data={}, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        room = serializer.save()
+        user = request.user
+        
+        if Room.objects.filter(member = user).exists():
+            return Response({'error':'user is already in these room'})
+        
+        try :
+            Room.objects.create(host=user)
+            Room.members.add(user)
 
-        request.user.current_room = room
-        request.user.save()
-
-        return Response(RoomCreateSerializer(room).data, status=202)
+            return  Response(
+                {
+                    "room_id": room.id,
+                    "room_code": room.room_code,
+                    "host": user.username
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except:
+            return Response({'error':'user already a host'})
 
 
 class JoinRoom(APIView):
@@ -58,34 +69,61 @@ class JoinRoom(APIView):
         serializer = RoomJoinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        code = serializer.validated_data['room_code']
-        room = Room.objects.get(room_code=code)
+        room = serializer.validated_data['room']
+        user = request.user
 
-        request.user.current_room = room
-        request.user.save()
+        if Room.objects.filter(members = user).exists():
+            return Response({
+                'error':'you already exist in room'
+            },status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(RoomJoinSerializer(room).data)
+        room.members.add(user)
+
+        return Response(
+            {
+                "room_id": room.id,
+                "room_code": room.room_code
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class LeaveRoom(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = RoomLeaveSerializer(data={}, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-
-        return Response({"message": "left the room"})
-
+        user = request.user
+        room = Room.objects.filter(members = user).first()
+        if not room:
+            return Response({
+                'error':'User is not in any room'
+            },status=status.HTTP_400_BAD_REQUEST)
+        
+        with transaction.atomic():
+            if room.host_id == user.id:
+                room.delete()
+                return Response({
+                    'message':'host leave the room so room closed'
+                },status=status.HTTP_200_OK)
+            
+            room.members.remove(user)
+        
+        return Response({
+            'message':'room leaved succesfulky'
+        })
+            
 
 class DetailRoom(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        room = request.user.current_room
+        user = request.user
+        room = Room.objects.filter(members = user).first()
+
         if not room:
-            return Response({"detail": "no room"}, status=400)
-        return Response(RoomSerializer(room).data)
+            return Response({'detail':'user not in any room'},status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response(RoomSerializer(room).data,status=status.HTTP_200_OK)
 
 class SongAddToQueue(APIView):
     permission_classes = [IsAuthenticated]
