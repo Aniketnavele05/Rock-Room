@@ -19,6 +19,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
 class RoomSerializer(serializers.ModelSerializer):
     host = serializers.SerializerMethodField()
+    is_host = serializers.SerializerMethodField()
 
     class Meta:
         model = Room
@@ -26,6 +27,10 @@ class RoomSerializer(serializers.ModelSerializer):
 
     def get_host(self, obj):
         return obj.host.username
+    
+    def is_host(self,obj):
+        request = self.context["request"]
+        return request.user == obj.host
 
 
 class RoomCreateSerializer(serializers.ModelSerializer):

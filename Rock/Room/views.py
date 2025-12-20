@@ -244,7 +244,7 @@ class PlayedSongView(APIView):
         songs = (
             Song.objects
             .filter(room=room)
-            .annotate(vote_count=Count('votes', filter=Q(votes__room=room)))
+            .annotate(vote_count=Count("votes"))
             .order_by("-vote_count", "created_at")
         )
 
@@ -252,14 +252,15 @@ class PlayedSongView(APIView):
             if song.was_played_within(10):
                 continue
 
-            song.mark_played()
+            with transaction.atomic():
+                song.mark_played()
+                Vote.objects.filter(song=song).delete()
 
             return Response({
                 "id": song.id,
                 "title": song.title,
                 "video_id": song.video_id,
                 "thumbnail": song.thumbnail,
-                "vote_count": song.vote_count,
                 "added_by": song.added_by.username,
             })
 

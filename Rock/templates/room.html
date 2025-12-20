@@ -7,178 +7,175 @@
 </head>
 <body>
 
-<h2>Welcome to Room: <span id="room_code_display"></span></h2>
-
+<h2>Room Code: <span id="room_code_display"></span></h2>
 <button onclick="leaveRoom()">Leave Room</button>
 
 <hr>
 
-<h3>Add Song to Queue</h3>
+<!-- HOST CONTROLS -->
+<div id="host_controls" style="display:none;">
+    <button onclick="playNext()">▶ Play Next</button>
+</div>
+
+<hr>
+
+<!-- PLAYER -->
+<iframe
+    id="player"
+    width="560"
+    height="315"
+    allow="autoplay"
+></iframe>
+
+<br>
+<button onclick="mute()">Mute</button>
+<button onclick="unmute()">Unmute</button>
+
+<hr>
+
+<h3>Add Song</h3>
 <input type="text" id="search_input" placeholder="Paste YouTube URL">
 <button onclick="AddToQueue()">Add</button>
 
 <hr>
 
-<h3>Queue:</h3>
+<h3>Queue</h3>
 <div id="queue_list"></div>
 
 <script>
-
-// ======================== TOKEN HELPERS ========================
+/* ================= TOKEN ================= */
 function getAccessToken() { return localStorage.getItem("access"); }
 function getRefreshToken() { return localStorage.getItem("refresh"); }
 
-// ======================== SAFE FETCH FUNCTION ========================
+/* ================= FETCH WITH AUTH ================= */
 async function fetchWithAuth(url, options = {}) {
-    let token = getAccessToken();
-
     if (!options.headers) options.headers = {};
-    options.headers["Authorization"] = "Bearer " + token;
-
+    options.headers["Authorization"] = "Bearer " + getAccessToken();
     if (options.method && options.method !== "GET") {
         options.headers["Content-Type"] = "application/json";
     }
 
-    let response;
+    let response = await fetch(url, options);
 
-    // 🔥 Catch network-level errors (server down etc.)  
-    try {
-        response = await fetch(url, options);
-    } catch (e) {
-        return {
-            ok: false,
-            status: 0,
-            data: { error: "Network error — server unreachable" }
-        };
-    }
-
-    // 🔁 Auto refresh token if expired  
     if (response.status === 401) {
-        const refreshRes = await fetch("/refresh/", {
+        const r = await fetch("/refresh/", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {"Content-Type":"application/json"},
             body: JSON.stringify({ refresh: getRefreshToken() })
         });
-
-        let newTok;
-        try { newTok = await refreshRes.json(); } catch { newTok = {}; }
-
-        if (newTok.access) {
-            localStorage.setItem("access", newTok.access);
-            options.headers["Authorization"] = "Bearer " + newTok.access;
-            response = await fetch(url, options);
-        }
+        const data = await r.json();
+        localStorage.setItem("access", data.access);
+        options.headers["Authorization"] = "Bearer " + data.access;
+        response = await fetch(url, options);
     }
 
-    // 🔥 Safely parse JSON WITHOUT causing console error  
     let data;
-    try {
-        data = await response.json();
-    } catch (err) {
-        data = { error: "Invalid server response" };
-    }
+    try { data = await response.json(); }
+    catch { data = {}; }
 
-    return { ok: response.ok, status: response.status, data };
+    return { ok: response.ok, data };
 }
 
-// ======================== LOAD ROOM ========================
-async function loadRoomDetails() {
-    const res = await fetchWithAuth("/api/detail_room/", { method: "GET" });
+/* ================= ROOM ================= */
+let isHost = false;
 
-    if (!res.ok) {
-        alert("Failed to load room");
-        return;
-    }
+async function loadRoomDetails() {
+    const res = await fetchWithAuth("/api/detail_room/");
+    if (!res.ok) return;
 
     document.getElementById("room_code_display").innerText = res.data.room_code;
+    isHost = res.data.is_host;
+
+    if (isHost) {
+        document.getElementById("host_controls").style.display = "block";
+    }
 }
 
-// ======================== LEAVE ROOM ========================
+/* ================= LEAVE ================= */
 async function leaveRoom() {
-    const res = await fetchWithAuth("/api/leave_room/", { method: "POST" });
-
-    alert(res.data.message);
+    await fetchWithAuth("/api/leave_room/", { method: "POST" });
     window.location.href = "/home/";
 }
 
-// ======================== LOAD QUEUE ========================
+/* ================= QUEUE ================= */
 async function loadQueue() {
-    const res = await fetchWithAuth("/api/room_songs/", { method: "GET" });
-
+    const res = await fetchWithAuth("/api/room_songs/");
     const list = document.getElementById("queue_list");
     list.innerHTML = "";
 
-    if (!res.ok) {
-        list.innerHTML = "<p>Error loading queue</p>";
-        return;
-    }
+    if (!res.ok) return;
 
-    if (!Array.isArray(res.data)) return;
-
-    res.data.forEach(song => addSongToDOM(song));
+    res.data.forEach(song => {
+        const div = document.createElement("div");
+        div.innerHTML = `
+            <img src="${song.thumbnail}" width="120"><br>
+            <b>${song.title}</b><br>
+            Votes: ${song.vote_count}<br>
+            <button onclick="voteSong(${song.id})">Vote</button>
+            <hr>
+        `;
+        list.appendChild(div);
+    });
 }
 
-// ======================== ADD TO QUEUE ========================
+/* ================= ADD SONG ================= */
 async function AddToQueue() {
     const url = document.getElementById("search_input").value.trim();
-
-    if (!url) {
-        alert("Please enter a YouTube URL");
-        return;
-    }
+    if (!url) return alert("Enter YouTube URL");
 
     const res = await fetchWithAuth("/api/add_song/", {
         method: "POST",
         body: JSON.stringify({ url })
     });
 
-    // ⚠️ SAFE ERROR HANDLING  
     if (!res.ok) {
-        if (res.data.url) {
-            alert(res.data.url[0]);   // serializer error  
-        } else if (res.data.error) {
-            alert(res.data.error);    // server message  
-        } else {
-            alert("Invalid YouTube URL or server error");
-        }
+        alert(res.data.error || "Failed");
         return;
     }
 
-    loadQueue();  // reload queue
-}
-
-// ======================== DISPLAY SONG ========================
-function addSongToDOM(song) {
-    const div = document.createElement("div");
-    div.style.margin = "12px 0";
-
-    div.innerHTML = `
-        <img src="${song.thumbnail}" width="120"><br>
-        <b>${song.title}</b><br>
-        <button onclick="voteSong(${song.id})">Vote</button>
-        <hr>
-    `;
-
-    document.getElementById("queue_list").appendChild(div);
-}
-
-// ======================== VOTE ========================
-async function voteSong(songId) {
-    const res = await fetchWithAuth("/api/vote_song/", {
-        method: "POST",
-        body: JSON.stringify({ song_id: songId })
-    });
-
-    alert(res.data.message);
+    document.getElementById("search_input").value = "";
     loadQueue();
 }
 
-// ======================== PAGE LOAD ========================
-window.onload = function() {
+/* ================= VOTE ================= */
+async function voteSong(songId) {
+    await fetchWithAuth(`/api/vote/${songId}/`, { method: "POST" });
+    loadQueue();
+}
+
+/* ================= PLAY NEXT (HOST) ================= */
+async function playNext() {
+    const res = await fetchWithAuth("/api/play_next/");
+    if (!res.ok) {
+        alert(res.data.message || "No song");
+        return;
+    }
+    play(res.data.video_id);
+}
+
+function play(videoId) {
+    document.getElementById("player").src =
+        `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`;
+}
+
+/* ================= MUTE ================= */
+function mute() {
+    document.getElementById("player").contentWindow.postMessage(
+        '{"event":"command","func":"mute","args":""}', '*'
+    );
+}
+function unmute() {
+    document.getElementById("player").contentWindow.postMessage(
+        '{"event":"command","func":"unMute","args":""}', '*'
+    );
+}
+
+/* ================= INIT ================= */
+window.onload = () => {
     loadRoomDetails();
     loadQueue();
+    setInterval(loadQueue, 3000);
 };
-
 </script>
 
 </body>
