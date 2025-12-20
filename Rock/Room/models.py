@@ -27,6 +27,18 @@ class Room(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def save(self, *args, **kwargs):
+        if not self.room_code:
+            self.room_code = self.generate_code()
+        super().save(*args, **kwargs)
+
+    def generate_code(self):
+        chars = string.ascii_uppercase + string.digits
+        while True:
+            code = ''.join(random.choices(chars, k=6))
+            if not Room.objects.filter(room_code=code).exists():
+                return code
+
 class Song(models.Model):
     room = models.ForeignKey(Room, on_delete=models.CASCADE)
     title = models.CharField(max_length=250)
