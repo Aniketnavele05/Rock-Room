@@ -38,7 +38,6 @@ class RoomJoinSerializer(serializers.Serializer):
 
     def validate(self, data):
         code = data['room_code']
-        
         try:
             room = Room.objects.get(room_code = code)
         except Room.DoesNotExist:
