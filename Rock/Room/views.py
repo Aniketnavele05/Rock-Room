@@ -129,16 +129,20 @@ class SongAdd(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+
         serializer = UrlExtractserializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         video_id = serializer.video_id
 
-        room = Room.objects.filter(members = request.user).first()
+        room = Room.objects.filter(members=request.user).first()
         if not room:
-            return Response({"error": "You are not in a room"}, status=400)
+            return Response(
+                {"error": "You are not in any room"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         oembed_url = (
-            f"https://www.youtube.com/oembed"
+            "https://www.youtube.com/oembed"
             f"?url=https://www.youtube.com/watch?v={video_id}&format=json"
         )
 
@@ -147,26 +151,61 @@ class SongAdd(APIView):
             resp.raise_for_status()
             meta = resp.json()
         except Exception:
-            return Response({"error": "Invalid YouTube video"}, status=400)
+            return Response(
+                {"error": "Invalid or unavailable YouTube video"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        song , created = Song.objects.get_or_create(
+        song, _ = Song.objects.get_or_create(
             video_id=video_id,
             defaults={
-                'title':meta.get('title'),
-                'thumbnail':meta.get('thumbnail_url')
-            }
+                "title": meta.get("title"),
+                "thumbnail": meta.get("thumbnail_url"),
+            },
         )
 
-        if RoomSong.objects.filter(room=room,song=song,played_at__isnull=True).exists():
-            return Response({'error':'Song already in room'},status=400)
+        room_song = (
+            RoomSong.objects
+            .filter(room=room, song=song)
+            .order_by("-created_at")
+            .first()
+        )
 
-        room_song = RoomSong.objects.create(room=room,song=song,added_by=request.user)
+        if room_song and room_song.played_at is None:
+            Vote.objects.get_or_create(
+                room_song=room_song,
+                user=request.user
+            )
+            return Response(
+                {"message": "Song already in queue. Vote registered."},
+                status=status.HTTP_200_OK
+            )
 
-        return Response({"id": song.id,
-                         'title':song.title,
-                         'vedio_id':song.video_id,
-                         'vote_count':0}, status=201)
+        if room_song and not room_song.can_play_again(minutes=10):
+            return Response(
+                {
+                    "error": "Song was played recently. Please wait 10 minutes."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        new_room_song = RoomSong.objects.create(
+            room=room,
+            song=song,
+            added_by=request.user
+        )
+
+        return Response(
+            {
+                "room_song_id": new_room_song.id,
+                "song_id": song.id,
+                "title": song.title,
+                "video_id": song.video_id,
+                "thumbnail": song.thumbnail,
+                "vote_count": 0
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 class RoomSongs(APIView):
     permission_classes = [IsAuthenticated]
