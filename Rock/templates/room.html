@@ -25,6 +25,7 @@
     width="560"
     height="315"
     allow="autoplay"
+    src=""
 ></iframe>
 
 <br>
@@ -35,7 +36,7 @@
 
 <h3>Add Song</h3>
 <input type="text" id="search_input" placeholder="Paste YouTube URL">
-<button onclick="AddToQueue()">Add</button>
+<button onclick="addToQueue()">Add</button>
 
 <hr>
 
@@ -43,7 +44,7 @@
 <div id="queue_list"></div>
 
 <script>
-/* ================= TOKEN ================= */
+/* ================= TOKEN HELPERS ================= */
 function getAccessToken() { return localStorage.getItem("access"); }
 function getRefreshToken() { return localStorage.getItem("refresh"); }
 
@@ -70,15 +71,14 @@ async function fetchWithAuth(url, options = {}) {
     }
 
     let data;
-    try { data = await response.json(); }
+    try { data = await response.json(); } 
     catch { data = {}; }
 
     return { ok: response.ok, data };
 }
 
-/* ================= ROOM ================= */
+/* ================= ROOM DETAILS ================= */
 let isHost = false;
-
 async function loadRoomDetails() {
     const res = await fetchWithAuth("/api/detail_room/");
     if (!res.ok) return;
@@ -91,9 +91,13 @@ async function loadRoomDetails() {
     }
 }
 
-/* ================= LEAVE ================= */
+/* ================= LEAVE ROOM ================= */
 async function leaveRoom() {
-    await fetchWithAuth("/api/leave_room/", { method: "POST" });
+    const res = await fetchWithAuth("/api/leave_room/", { method: "POST" });
+    if (!res.ok) {
+        alert(res.data.error || "Failed to leave room");
+        return;
+    }
     window.location.href = "/home/";
 }
 
@@ -119,9 +123,9 @@ async function loadQueue() {
 }
 
 /* ================= ADD SONG ================= */
-async function AddToQueue() {
+async function addToQueue() {
     const url = document.getElementById("search_input").value.trim();
-    if (!url) return alert("Enter YouTube URL");
+    if (!url) return alert("Enter a YouTube URL");
 
     const res = await fetchWithAuth("/api/add_song/", {
         method: "POST",
@@ -129,7 +133,7 @@ async function AddToQueue() {
     });
 
     if (!res.ok) {
-        alert(res.data.error || "Failed");
+        alert(res.data.error || "Failed to add song");
         return;
     }
 
@@ -139,31 +143,35 @@ async function AddToQueue() {
 
 /* ================= VOTE ================= */
 async function voteSong(songId) {
-    await fetchWithAuth(`/api/vote/${songId}/`, { method: "POST" });
+    const res = await fetchWithAuth(`/api/vote/${songId}/`, { method: "POST" });
+    if (!res.ok) {
+        alert(res.data.error || "Failed to vote");
+    }
     loadQueue();
 }
 
-/* ================= PLAY NEXT (HOST) ================= */
+/* ================= PLAY NEXT ================= */
 async function playNext() {
     const res = await fetchWithAuth("/api/play_next/");
     if (!res.ok) {
-        alert(res.data.message || "No song");
+        alert(res.data.message || "No song available");
         return;
     }
-    play(res.data.video_id);
+    playVideo(res.data.video_id);
 }
 
-function play(videoId) {
+function playVideo(videoId) {
     document.getElementById("player").src =
         `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`;
 }
 
-/* ================= MUTE ================= */
+/* ================= MUTE/UNMUTE ================= */
 function mute() {
     document.getElementById("player").contentWindow.postMessage(
         '{"event":"command","func":"mute","args":""}', '*'
     );
 }
+
 function unmute() {
     document.getElementById("player").contentWindow.postMessage(
         '{"event":"command","func":"unMute","args":""}', '*'

@@ -1,16 +1,16 @@
 import requests
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef
 from django.conf import settings
 from django.shortcuts import render, redirect
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import Room, Song, User, Vote
+from .models import Room, Song, Vote, RoomSong
 from rest_framework import status
 from .serializer import (
-    RegistrationSerializer, RoomCreateSerializer,
-    RoomJoinSerializer, RoomLeaveSerializer,
+    RegistrationSerializer, 
+    RoomJoinSerializer, 
     RoomSerializer, UrlExtractserializer,
     VoteSerializer,
 )
@@ -43,7 +43,7 @@ class CreateRoom(APIView):
     def post(self, request):
         user = request.user
         
-        if Room.objects.filter(member = user).exists():
+        if Room.objects.filter(members = user).exists():
             return Response({'error':'user is already in these room'})
         
         try :
@@ -125,16 +125,15 @@ class DetailRoom(APIView):
         
         return Response(RoomSerializer(room).data,status=status.HTTP_200_OK)
 
-class SongAddToQueue(APIView):
+class SongAdd(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         serializer = UrlExtractserializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         video_id = serializer.video_id
-        room = request.user.current_room
 
+        room = Room.objects.filter(members = request.user).first()
         if not room:
             return Response({"error": "You are not in a room"}, status=400)
 
@@ -150,52 +149,51 @@ class SongAddToQueue(APIView):
         except Exception:
             return Response({"error": "Invalid YouTube video"}, status=400)
 
-        if Song.objects.filter(
-            room=room,
+        song , created = Song.objects.get_or_create(
             video_id=video_id,
-            played_at__isnull=True
-        ).exists():
-            return Response(
-                {"error": "Song already in queue"},
-                status=400
-            )
-
-        song = Song.objects.create(
-            room=room,
-            title=meta.get("title"),
-            video_id=video_id,
-            thumbnail=meta.get("thumbnail_url"),
-            added_by=request.user
+            defaults={
+                'title':meta.get('title'),
+                'thumbnail':meta.get('thumbnail_url')
+            }
         )
 
-        return Response({"id": song.id}, status=201)
+        if RoomSong.objects.filter(room=room,song=song,played_at__isnull=True).exists():
+            return Response({'error':'Song already in room'},status=400)
+
+        room_song = RoomSong.objects.create(room=room,song=song,added_by=request.user)
+
+        return Response({"id": song.id,
+                         'title':song.title,
+                         'vedio_id':song.video_id,
+                         'vote_count':0}, status=201)
+
 
 class RoomSongs(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        room = request.user.current_room
+        user = request.user
+
+        room = Room.objects.filter(members=user).first()
         if not room:
             return Response({"error": "You are not in a room"}, status=400)
 
-        songs = (
-            Song.objects
-            .filter(room=room)
-            .annotate(vote_count=Count('votes', filter=Q(votes__room=room)))
-            .order_by("-vote_count", "created_at")
+        qs = (
+            RoomSong.objects.filter(room=room,played_at__isnull=True)
+            .annotate(
+                vote_count=Count('votes'),
+                has_voted=Exists(
+                    Vote.objects.filter(
+                        room_song=OuterRef('pk'),
+                        user=user
+                    )
+                )
+            )
+            .order_by('-vote_count','created_at')
         )
 
-        return Response([
-            {
-                "id": s.id,
-                "title": s.title,
-                "video_id": s.video_id,
-                "thumbnail": s.thumbnail,
-                "vote_count": s.vote_count,
-                "played_at": s.played_at,
-            }
-            for s in songs
-        ])
+        serializer = RoomSerializer(qs,many=True)
+        return Response(serializer.data)
 
 
 class VoteView(APIView):

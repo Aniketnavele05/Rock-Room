@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Room, Vote
+from .models import User, Room, Vote, RoomSong
 import re
 
 class RegistrationSerializer(serializers.ModelSerializer):
@@ -53,6 +53,23 @@ class SongSerializer(serializers.Serializer):
     thumbnail = serializers.CharField()
     channel = serializers.CharField()
 
+class RoomSongSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(source="song.title")
+    video_id = serializers.CharField(source="song.video_id")
+    thumbnail = serializers.URLField(source="song.thumbnail")
+    vote_count = serializers.IntegerField()
+    has_voted = serializers.BooleanField()
+
+    class Meta:
+        model = RoomSong
+        fields = [
+            "id",
+            "title",
+            "video_id",
+            "thumbnail",
+            "vote_count",
+            "has_voted",
+        ]
 
 class UrlExtractserializer(serializers.Serializer):
     url = serializers.CharField()
