@@ -4,6 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rock N Roll - Room</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #player {
+            width: 640px;
+            height: 360px;
+            background: black;
+            margin-bottom: 10px;
+        }
+        img {
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
 
@@ -12,23 +26,9 @@
 
 <hr>
 
-<!-- HOST CONTROLS -->
-<div id="host_controls" style="display:none;">
-    <button onclick="playNext()">▶ Play Next</button>
-</div>
-
-<hr>
-
 <!-- PLAYER -->
-<iframe
-    id="player"
-    width="560"
-    height="315"
-    allow="autoplay"
-    src=""
-></iframe>
+<div id="player"></div>
 
-<br>
 <button onclick="mute()">Mute</button>
 <button onclick="unmute()">Unmute</button>
 
@@ -44,6 +44,11 @@
 <div id="queue_list"></div>
 
 <script>
+/* ================= GLOBALS ================= */
+let player = null;
+let playerReady = false;
+let currentRoomSongId = null;
+
 /* ================= TOKEN HELPERS ================= */
 function getAccessToken() { return localStorage.getItem("access"); }
 function getRefreshToken() { return localStorage.getItem("refresh"); }
@@ -52,6 +57,7 @@ function getRefreshToken() { return localStorage.getItem("refresh"); }
 async function fetchWithAuth(url, options = {}) {
     if (!options.headers) options.headers = {};
     options.headers["Authorization"] = "Bearer " + getAccessToken();
+
     if (options.method && options.method !== "GET") {
         options.headers["Content-Type"] = "application/json";
     }
@@ -59,130 +65,156 @@ async function fetchWithAuth(url, options = {}) {
     let response = await fetch(url, options);
 
     if (response.status === 401) {
-        const r = await fetch("/refresh/", {
+        const r = await fetch("/api/token/refresh/", {
             method: "POST",
-            headers: {"Content-Type":"application/json"},
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ refresh: getRefreshToken() })
         });
+
         const data = await r.json();
         localStorage.setItem("access", data.access);
+
         options.headers["Authorization"] = "Bearer " + data.access;
         response = await fetch(url, options);
     }
 
-    let data;
-    try { data = await response.json(); } 
-    catch { data = {}; }
-
+    let data = {};
+    try { data = await response.json(); } catch {}
     return { ok: response.ok, data };
 }
 
 /* ================= ROOM DETAILS ================= */
-let isHost = false;
 async function loadRoomDetails() {
-    const res = await fetchWithAuth("/api/detail_room/");
-    if (!res.ok) return;
-
-    document.getElementById("room_code_display").innerText = res.data.room_code;
-    isHost = res.data.is_host;
-
-    if (isHost) {
-        document.getElementById("host_controls").style.display = "block";
+    const res = await fetchWithAuth("/api/room/detail/");
+    if (res.ok) {
+        document.getElementById("room_code_display").innerText = res.data.room_code;
     }
 }
 
+(function loadYouTubeAPI() {
+    if (window.YT && window.YT.Player) return;
+
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    tag.async = true;
+
+    tag.onerror = function () {
+        console.error("YouTube API blocked. Retrying...");
+        setTimeout(loadYouTubeAPI, 3000);
+    };
+
+    document.head.appendChild(tag);
+})();
 /* ================= LEAVE ROOM ================= */
 async function leaveRoom() {
-    const res = await fetchWithAuth("/api/leave_room/", { method: "POST" });
-    if (!res.ok) {
-        alert(res.data.error || "Failed to leave room");
-        return;
-    }
+    await fetchWithAuth("/api/room/leave/", { method: "POST" });
     window.location.href = "/home/";
 }
 
 /* ================= QUEUE ================= */
 async function loadQueue() {
-    const res = await fetchWithAuth("/api/room_songs/");
+    const res = await fetchWithAuth("/api/songs/queue/");
+    if (!res.ok) return;
+
     const list = document.getElementById("queue_list");
     list.innerHTML = "";
 
-    if (!res.ok) return;
-
     res.data.forEach(song => {
-        const div = document.createElement("div");
-        div.innerHTML = `
-            <img src="${song.thumbnail}" width="120"><br>
-            <b>${song.title}</b><br>
-            Votes: ${song.vote_count}<br>
-            <button onclick="voteSong(${song.id})">Vote</button>
-            <hr>
+        list.innerHTML += `
+            <div>
+                <img src="${song.thumbnail}" width="120"><br>
+                <b>${song.title}</b><br>
+                Votes: ${song.vote_count}<br>
+                <button onclick="voteSong(${song.id})">
+                    ${song.has_voted ? "Unvote" : "Vote"}
+                </button>
+                <hr>
+            </div>
         `;
-        list.appendChild(div);
     });
 }
 
 /* ================= ADD SONG ================= */
 async function addToQueue() {
     const url = document.getElementById("search_input").value.trim();
-    if (!url) return alert("Enter a YouTube URL");
+    if (!url) return alert("Paste YouTube URL");
 
-    const res = await fetchWithAuth("/api/add_song/", {
+    const res = await fetchWithAuth("/api/songs/add/", {
         method: "POST",
         body: JSON.stringify({ url })
     });
 
-    if (!res.ok) {
-        alert(res.data.error || "Failed to add song");
-        return;
-    }
+    if (!res.ok) alert(res.data.error || "Error adding song");
 
     document.getElementById("search_input").value = "";
     loadQueue();
 }
 
 /* ================= VOTE ================= */
-async function voteSong(songId) {
-    const res = await fetchWithAuth(`/api/vote/${songId}/`, { method: "POST" });
-    if (!res.ok) {
-        alert(res.data.error || "Failed to vote");
-    }
+async function voteSong(id) {
+    await fetchWithAuth(`/api/songs/${id}/vote/`, { method: "POST" });
     loadQueue();
 }
 
-/* ================= PLAY NEXT ================= */
-async function playNext() {
-    const res = await fetchWithAuth("/api/play_next/");
-    if (!res.ok) {
-        alert(res.data.message || "No song available");
-        return;
+/* ================= YOUTUBE PLAYER ================= */
+function onYouTubeIframeAPIReady() {
+    console.log("YouTube API loaded");
+
+    player = new YT.Player("player", {
+        height: "360",
+        width: "640",
+        playerVars: {
+            autoplay: 1,
+            mute: 1,
+            rel: 0,
+            enablejsapi: 1,
+            origin: window.location.origin
+        },
+        events: {
+            onReady: () => {
+                console.log("Player ready");
+                playerReady = true;
+                player.mute();
+            },
+            onStateChange: onPlayerStateChange
+        }
+    });
+}
+
+function onPlayerStateChange(event) {
+    if (event.data === YT.PlayerState.ENDED) {
+        fetchWithAuth("/api/songs/play-next/", { method: "POST" });
     }
-    playVideo(res.data.video_id);
 }
 
-function playVideo(videoId) {
-    document.getElementById("player").src =
-        `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`;
+/* ================= NOW PLAYING ================= */
+async function syncNowPlaying() {
+    if (!playerReady) return;
+
+    const res = await fetchWithAuth("/api/songs/now-playing/");
+    if (!res.ok || !res.data.video_id) return;
+
+    if (currentRoomSongId !== res.data.room_song_id) {
+        currentRoomSongId = res.data.room_song_id;
+        player.loadVideoById(res.data.video_id);
+        player.playVideo();
+    }
 }
 
-/* ================= MUTE/UNMUTE ================= */
-function mute() {
-    document.getElementById("player").contentWindow.postMessage(
-        '{"event":"command","func":"mute","args":""}', '*'
-    );
-}
-
-function unmute() {
-    document.getElementById("player").contentWindow.postMessage(
-        '{"event":"command","func":"unMute","args":""}', '*'
-    );
-}
+/* ================= CONTROLS ================= */
+function mute() { if (playerReady) player.mute(); }
+function unmute() { if (playerReady) player.unMute(); }
 
 /* ================= INIT ================= */
 window.onload = () => {
     loadRoomDetails();
     loadQueue();
+
     setInterval(loadQueue, 3000);
+
+    setTimeout(() => {
+        setInterval(syncNowPlaying, 2000);
+    }, 1500);
 };
 </script>
 

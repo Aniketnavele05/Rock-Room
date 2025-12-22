@@ -1,66 +1,60 @@
 import requests
-from django.db import IntegrityError, transaction
+from django.db import transaction, IntegrityError
 from django.db.models import Count, Exists, OuterRef
-from django.conf import settings
-from django.shortcuts import render, redirect
+from django.shortcuts import render
+from django.utils import timezone
 from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import Room, Song, Vote, RoomSong
+from rest_framework.response import Response
 from rest_framework import status
+
+from .models import Room, Song, RoomSong, Vote
 from .serializer import (
-    RegistrationSerializer, 
-    RoomJoinSerializer, 
-    RoomSerializer, UrlExtractserializer,
-    VoteSerializer,
+    RegistrationSerializer,
+    RoomJoinSerializer,
+    RoomSerializer,
+    UrlExtractSerializer,
+    RoomSongSerializer
 )
+
+from django.shortcuts import render
 
 
 def index(request):
-    return render(request, 'Auth.html')
+    return render(request, "Auth.html")
 
 
 def home(request):
-    return render(request, 'home.html')
+    return render(request, "home.html")
 
 
 def room(request):
-    return render(request, 'room.html')
-
+    return render(request, "room.html")
 
 class Registration(APIView):
     def post(self, request):
         serializer = RegistrationSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return redirect('/')
-        return Response(serializer.errors, status=400)
-
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"message": "User registered"}, status=201)
 
 class CreateRoom(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         user = request.user
-        
-        if Room.objects.filter(members = user).exists():
-            return Response({'error':'user is already in these room'})
-        
-        try :
-            Room.objects.create(host=user)
-            Room.members.add(user)
 
-            return  Response(
-                {
-                    "room_id": room.id,
-                    "room_code": room.room_code,
-                    "host": user.username
-                },
-                status=status.HTTP_201_CREATED
-            )
-        except:
-            return Response({'error':'user already a host'})
+        if Room.objects.filter(members=user).exists():
+            return Response({"error": "User already in a room"}, status=400)
 
+        try:
+            with transaction.atomic():
+                room = Room.objects.create(host=user)
+                room.members.add(user)
+        except IntegrityError:
+            return Response({"error": "User already hosts a room"}, status=400)
+
+        return Response(RoomSerializer(room, context={"request": request}).data, status=201)
 
 class JoinRoom(APIView):
     permission_classes = [IsAuthenticated]
@@ -69,23 +63,14 @@ class JoinRoom(APIView):
         serializer = RoomJoinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        room = serializer.validated_data['room']
+        room = serializer.validated_data["room"]
         user = request.user
 
-        if Room.objects.filter(members = user).exists():
-            return Response({
-                'error':'you already exist in room'
-            },status=status.HTTP_400_BAD_REQUEST)
+        if Room.objects.filter(members=user).exists():
+            return Response({"error": "Already in another room"}, status=400)
 
         room.members.add(user)
-
-        return Response(
-            {
-                "room_id": room.id,
-                "room_code": room.room_code
-            },
-            status=status.HTTP_200_OK
-        )
+        return Response(RoomSerializer(room, context={"request": request}).data)
 
 
 class LeaveRoom(APIView):
@@ -93,253 +78,199 @@ class LeaveRoom(APIView):
 
     def post(self, request):
         user = request.user
-        room = Room.objects.filter(members = user).first()
+        room = Room.objects.filter(members=user).first()
+
         if not room:
-            return Response({
-                'error':'User is not in any room'
-            },status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response({"error": "Not in any room"}, status=400)
+
         with transaction.atomic():
-            if room.host_id == user.id:
+            if room.host == user:
                 room.delete()
-                return Response({
-                    'message':'host leave the room so room closed'
-                },status=status.HTTP_200_OK)
-            
+                return Response({"message": "Room closed (host left)"})
+
             room.members.remove(user)
-        
-        return Response({
-            'message':'room leaved succesfulky'
-        })
-            
+
+        return Response({"message": "Left room"})
 
 class DetailRoom(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        room = Room.objects.filter(members = user).first()
-
+        room = Room.objects.filter(members=request.user).first()
         if not room:
-            return Response({'detail':'user not in any room'},status=status.HTTP_400_BAD_REQUEST)
-        
-        return Response(RoomSerializer(room).data,status=status.HTTP_200_OK)
+            return Response({"error": "Not in a room"}, status=400)
+
+        return Response(RoomSerializer(room, context={"request": request}).data)
+
 
 class SongAdd(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-
-        serializer = UrlExtractserializer(data=request.data)
+        serializer = UrlExtractSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         video_id = serializer.video_id
 
         room = Room.objects.filter(members=request.user).first()
         if not room:
-            return Response(
-                {"error": "You are not in any room"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "Not in a room"}, status=400)
 
-        oembed_url = (
-            "https://www.youtube.com/oembed"
-            f"?url=https://www.youtube.com/watch?v={video_id}&format=json"
-        )
-
+    
         try:
-            resp = requests.get(oembed_url, timeout=5)
+            resp = requests.get(
+                f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json",
+                timeout=5
+            )
             resp.raise_for_status()
             meta = resp.json()
         except Exception:
-            return Response(
-                {"error": "Invalid or unavailable YouTube video"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "Invalid YouTube video"}, status=400)
 
         song, _ = Song.objects.get_or_create(
             video_id=video_id,
             defaults={
-                "title": meta.get("title"),
-                "thumbnail": meta.get("thumbnail_url"),
-            },
+                "title": meta["title"],
+                "thumbnail": meta["thumbnail_url"]
+            }
         )
 
-        room_song = (
-            RoomSong.objects
-            .filter(room=room, song=song)
-            .order_by("-created_at")
-            .first()
-        )
+        room_song = RoomSong.objects.filter(room=room, song=song).first()
 
+        
         if room_song and room_song.played_at is None:
-            Vote.objects.get_or_create(
-                room_song=room_song,
-                user=request.user
-            )
-            return Response(
-                {"message": "Song already in queue. Vote registered."},
-                status=status.HTTP_200_OK
-            )
+            Vote.objects.get_or_create(room_song=room_song, user=request.user)
+            return Response({"message": "Vote registered"}, status=200)
 
+        
         if room_song and not room_song.can_play_again(minutes=10):
-            return Response(
-                {
-                    "error": "Song was played recently. Please wait 10 minutes."
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "Song cooldown active (10 min)"}, status=400)
 
-        new_room_song = RoomSong.objects.create(
+        
+        new_song = RoomSong.objects.create(
             room=room,
             song=song,
             added_by=request.user
         )
 
-        return Response(
-            {
-                "room_song_id": new_room_song.id,
-                "song_id": song.id,
-                "title": song.title,
-                "video_id": song.video_id,
-                "thumbnail": song.thumbnail,
-                "vote_count": 0
-            },
-            status=status.HTTP_201_CREATED
-        )
+        return Response(RoomSongSerializer(new_song).data, status=201)
 
 class RoomSongs(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-
-        room = Room.objects.filter(members=user).first()
+        room = Room.objects.filter(members=request.user).first()
         if not room:
-            return Response({"error": "You are not in a room"}, status=400)
+            return Response({"error": "Not in room"}, status=400)
 
         qs = (
-            RoomSong.objects.filter(room=room,played_at__isnull=True)
+            RoomSong.objects
+            .filter(room=room, played_at__isnull=True)
             .annotate(
-                vote_count=Count('votes'),
+                vote_count=Count("votes"),
                 has_voted=Exists(
                     Vote.objects.filter(
-                        room_song=OuterRef('pk'),
-                        user=user
+                        room_song=OuterRef("pk"),
+                        user=request.user
                     )
                 )
             )
-            .order_by('-vote_count','created_at')
+            .order_by("-vote_count", "created_at")
         )
 
-        serializer = RoomSerializer(qs,many=True)
-        return Response(serializer.data)
+        return Response(RoomSongSerializer(qs, many=True).data)
 
-
-class VoteView(APIView):
+class VoteToggle(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, song_id):
-        user = request.user
-        room = user.current_room
-        if not room:
-            return Response({'error': 'You are not in a room'}, status=400)
+    def post(self, request, room_song_id):
+        room_song = RoomSong.objects.get(id=room_song_id)
 
-        try:
-            song = Song.objects.get(id=song_id, room=room)
-        except Song.DoesNotExist:
-            return Response({'error': 'Song not found in this room'}, status=404)
+        if request.user not in room_song.room.members.all():
+            return Response({"error": "Forbidden"}, status=403)
 
-        try:
-            with transaction.atomic():
-                vote = Vote.objects.create(song=song, user=user, room=room)
-        except IntegrityError:
-            return Response({'error': 'You already voted for this song'}, status=status.HTTP_400_BAD_REQUEST)
+        vote = Vote.objects.filter(room_song=room_song, user=request.user).first()
 
-        serializer = VoteSerializer(vote)
-        vote_count = Vote.objects.filter(song=song, room=room).count()
-        return Response({"vote": serializer.data, "vote_count": vote_count}, status=status.HTTP_201_CREATED)
-
-    def delete(self, request, song_id):
-        user = request.user
-        room = user.current_room
-        if not room:
-            return Response({'error': 'You are not in a room'}, status=400)
-
-        try:
-            song = Song.objects.get(id=song_id, room=room)
-        except Song.DoesNotExist:
-            return Response({'error': 'Song not found in this room'}, status=404)
-
-        vote = Vote.objects.filter(song=song, user=user, room=room).first()
-        if not vote:
-            return Response({'error': 'You have not voted for this song'}, status=status.HTTP_400_BAD_REQUEST)
-
-        vote.delete()
-        vote_count = Vote.objects.filter(song=song, room=room).count()
-        return Response({'message': 'Vote removed', 'vote_count': vote_count}, status=status.HTTP_200_OK)
-
-class VoteToggleView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, song_id):
-        user = request.user
-        room = user.current_room
-        if not room:
-            return Response({'error': 'You are not in a room'}, status=400)
-
-        try:
-            song = Song.objects.get(id=song_id, room=room)
-        except Song.DoesNotExist:
-            return Response({'error': 'Song not found in this room'}, status=404)
-
-        existing = Vote.objects.filter(song=song, user=user, room=room).first()
-        if existing:
-            existing.delete()
+        if vote:
+            vote.delete()
             action = "removed"
         else:
-            try:
-                with transaction.atomic():
-                    Vote.objects.create(song=song, user=user, room=room)
-                action = "added"
-            except IntegrityError:
-                return Response({"error": "You already voted"}, status=status.HTTP_400_BAD_REQUEST)
+            Vote.objects.create(room_song=room_song, user=request.user)
+            action = "added"
 
-        vote_count = Vote.objects.filter(song=song, room=room).count()
-        return Response({"action": action, "vote_count": vote_count}, status=status.HTTP_200_OK)
+        return Response({
+            "action": action,
+            "vote_count": room_song.votes.count()
+        })
 
-
-class PlayedSongView(APIView):
+class PlayNextSong(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        room = request.user.current_room
-        if not room:
-            return Response({"error": "You are not in a room"}, status=400)
+    def post(self, request):
+        try:
+            room = Room.objects.get(host=request.user)
+        except Room.DoesNotExist:
+            return Response(
+                {"detail": "Only host can play next"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-        songs = (
-            Song.objects
+        candidates = (
+            RoomSong.objects
             .filter(room=room)
             .annotate(vote_count=Count("votes"))
             .order_by("-vote_count", "created_at")
         )
 
-        for song in songs:
-            if song.was_played_within(10):
-                continue
+        next_song = None
+        for rs in candidates:
+            if rs.can_play_again(10):
+                next_song = rs
+                break
 
-            with transaction.atomic():
-                song.mark_played()
-                Vote.objects.filter(song=song).delete()
+        if not next_song:
+            return Response(
+                {"detail": "No playable songs"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-            return Response({
-                "id": song.id,
-                "title": song.title,
-                "video_id": song.video_id,
-                "thumbnail": song.thumbnail,
-                "added_by": song.added_by.username,
-            })
+        next_song.mark_played()
 
-        return Response(
-            {"message": "No playable song (cooldown active)"},
-            status=200
+        return Response({
+            "room_song_id": next_song.id,
+            "video_id": next_song.song.video_id,
+            "title": next_song.song.title,
+        })
+    
+
+class NowPlaying(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            room = Room.objects.get(members=request.user)
+        except Room.DoesNotExist:
+            return Response(
+                {"detail": "User not in a room"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        room_song = (
+            RoomSong.objects
+            .filter(room=room, played_at__isnull=False)
+            .select_related("song")
+            .order_by("-played_at")
+            .first()
         )
+
+        if not room_song:
+            return Response(
+                {"video_id": None},
+                status=status.HTTP_200_OK
+            )
+
+        return Response({
+            "room_song_id": room_song.id,
+            "video_id": room_song.song.video_id,
+            "title": room_song.song.title,
+            "played_at": room_song.played_at,
+        })

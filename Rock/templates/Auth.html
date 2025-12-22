@@ -6,34 +6,40 @@
     <title>Authentication</title>
 </head>
 <body>
-    <h2>Registration</h2>
-    <form action="/api/register/" method='POST'>
-        {% csrf_token %}
-        <label for="username">username</label>
-        <input type="text" id='reg_username' name='username'>
-        <br>
-        <label for='password'>password</label>
-        <input type="password" id='reg_password' name='password'>
-        <br>
-        <input type='submit'>
-    </form>
-    <h2>Login</h2>
-    <form onsubmit="login(event)">
-    {% csrf_token %}
-    <label>username</label>
-    <input type="text" id="log_username">
 
-    <label>password</label>
-    <input type="password" id="log_password">
+<h2>Registration</h2>
+<form action="/api/register/" method="POST">
+    {% csrf_token %}
+    <label>Username</label>
+    <input type="text" name="username" required>
+
+    <br>
+
+    <label>Password</label>
+    <input type="password" name="password" required>
+
+    <br>
+    <input type="submit" value="Register">
+</form>
+
+<hr>
+
+<h2>Login</h2>
+<form onsubmit="login(event)">
+    <label>Username</label>
+    <input type="text" id="log_username" required>
+
+    <label>Password</label>
+    <input type="password" id="log_password" required>
 
     <input type="submit" value="Login">
 </form>
 
 <script>
 function login(event) {
-    event.preventDefault();  // stop redirect
+    event.preventDefault();
 
-    fetch("/login/", {
+    fetch("/api/login/", {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
@@ -48,13 +54,14 @@ function login(event) {
         if (data.access) {
             localStorage.setItem("access", data.access);
             localStorage.setItem("refresh", data.refresh);
-            alert("Login successful!");
             window.location.href = "/home/";
         } else {
-            alert("Invalid username or password");
+            alert("Invalid credentials");
         }
     });
 }
 </script>
+
+
 </body>
 </html>
